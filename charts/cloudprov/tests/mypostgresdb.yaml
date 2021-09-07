@@ -1,0 +1,7 @@
+kind: Postgres
+apiVersion: cloudprov.org/v1
+metadata:
+  name: mypostgresdb
+spec:
+  authSecret: myPostgresRootSecret
+  

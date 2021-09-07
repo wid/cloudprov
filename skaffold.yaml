@@ -1,0 +1,26 @@
+apiVersion: skaffold/v2beta5
+kind: Config
+build:
+  tagPolicy:
+    sha256: {}
+  artifacts:
+    - image: cloudprov
+      context: ./cloudprov
+      sync:
+        infer:
+          - '*.go'
+          - '**/*.go'
+  local:
+    push: true
+    concurrency: 1
+deploy:
+  kubeContext: sgforge-forge-dev-aks1
+  helm:
+    releases:
+      - name: cloudprov
+        chartPath: charts/cloudprov
+        namespace: cloudprov
+        artifactOverrides:
+          image: cloudprov
+        imageStrategy:
+          helm: {}
