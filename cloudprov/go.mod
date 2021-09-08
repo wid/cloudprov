@@ -1,10 +1,11 @@
 // This is a generated file. Do not edit directly.
 
-module k8s.io/sample-controller
+module cloudprov.org/cloudprov-controller
 
 go 1.16
 
 require (
+	github.com/google/uuid v1.3.0
 	k8s.io/api v0.0.0-20210825040442-f20796d02069
 	k8s.io/apimachinery v0.0.0-20210825040238-74be3b88bedb
 	k8s.io/client-go v0.0.0-20210827200652-b350fc31ceb9

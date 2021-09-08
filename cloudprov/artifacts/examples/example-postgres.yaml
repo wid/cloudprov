@@ -1,0 +1,22 @@
+apiVersion: cloudprov.org/v1alpha1
+kind: Postgres
+metadata:
+  name: example-postgres
+  finalizers:
+  - cloudprov.org/delete-database
+spec:
+  databaseName: example-databaseName
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: example-pod
+spec:
+  containers:
+  - name: postgres-tester
+    image: widmaster/postgres-provisionner
+    command: [ "sh", "-c", "sleep 3600" ]
+    envFrom:
+      - secretRef:
+          name: example-postgres
+  restartPolicy: Never

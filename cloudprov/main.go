@@ -17,25 +17,40 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
+	"fmt"
+	"os"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	kubeinformers "k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
-	// Uncomment the following line to load the gcp plugin (only required to authenticate against GKE clusters).
-	// _ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 
-	clientset "k8s.io/sample-controller/pkg/generated/clientset/versioned"
-	informers "k8s.io/sample-controller/pkg/generated/informers/externalversions"
-	"k8s.io/sample-controller/pkg/signals"
+	clientset "cloudprov.org/cloudprov-controller/pkg/generated/clientset/versioned"
+	informers "cloudprov.org/cloudprov-controller/pkg/generated/informers/externalversions"
+	"cloudprov.org/cloudprov-controller/pkg/signals"
 )
 
-var (
-	masterURL  string
-	kubeconfig string
-)
+type Config struct {
+	AdminSecret               string
+	MasterURL                 string
+	Kubeconfig                string
+	JobNamespace              string
+	TTLSecondsAfterFinished   int
+	TTLSecondsAfterFinished32 int32
+	Debug                     bool
+	NameLabel                 string
+	InstanceLabel             string
+	SelfPod                   *corev1.Pod
+}
+
+var config Config
 
 func main() {
 	klog.InitFlags(nil)
@@ -44,7 +59,7 @@ func main() {
 	// set up signals so we handle the first shutdown signal gracefully
 	stopCh := signals.SetupSignalHandler()
 
-	cfg, err := clientcmd.BuildConfigFromFlags(masterURL, kubeconfig)
+	cfg, err := clientcmd.BuildConfigFromFlags(config.MasterURL, config.Kubeconfig)
 	if err != nil {
 		klog.Fatalf("Error building kubeconfig: %s", err.Error())
 	}
@@ -54,29 +69,45 @@ func main() {
 		klog.Fatalf("Error building kubernetes clientset: %s", err.Error())
 	}
 
-	exampleClient, err := clientset.NewForConfig(cfg)
+	cloudprovClient, err := clientset.NewForConfig(cfg)
 	if err != nil {
-		klog.Fatalf("Error building example clientset: %s", err.Error())
+		klog.Fatalf("Error building cloudprov clientset: %s", err.Error())
 	}
 
 	kubeInformerFactory := kubeinformers.NewSharedInformerFactory(kubeClient, time.Second*30)
-	exampleInformerFactory := informers.NewSharedInformerFactory(exampleClient, time.Second*30)
+	cloudprovInformerFactory := informers.NewSharedInformerFactory(cloudprovClient, time.Second*30)
 
-	controller := NewController(kubeClient, exampleClient,
-		kubeInformerFactory.Apps().V1().Deployments(),
-		exampleInformerFactory.Samplecontroller().V1alpha1().Foos())
+	config.JobNamespace = getPodNamespace()
 
-	// notice that there is no need to run Start methods in a separate goroutine. (i.e. go kubeInformerFactory.Start(stopCh)
-	// Start method is non-blocking and runs all registered informers in a dedicated goroutine.
+	podList, err := kubeClient.CoreV1().Pods(getPodNamespace()).List(context.TODO(), v1.ListOptions{LabelSelector: getSelfSelector().String()})
+	panicErr(err)
+	if len(podList.Items) > 1 {
+		panicErr(fmt.Errorf("Found too many cloudprov running"))
+	}
+	config.SelfPod = podList.Items[0].DeepCopy()
+
+	config.TTLSecondsAfterFinished32 = int32(config.TTLSecondsAfterFinished)
+	controller := NewController(kubeClient, cloudprovClient,
+		kubeInformerFactory.Batch().V1().Jobs(),
+		cloudprovInformerFactory.Samplecontroller().V1alpha1().Postgreses(),
+		config)
+
 	kubeInformerFactory.Start(stopCh)
-	exampleInformerFactory.Start(stopCh)
+	cloudprovInformerFactory.Start(stopCh)
 
 	if err = controller.Run(2, stopCh); err != nil {
 		klog.Fatalf("Error running controller: %s", err.Error())
 	}
 }
 
-func init() {
-	flag.StringVar(&kubeconfig, "kubeconfig", "", "Path to a kubeconfig. Only required if out-of-cluster.")
-	flag.StringVar(&masterURL, "master", "", "The address of the Kubernetes API server. Overrides any value in kubeconfig. Only required if out-of-cluster.")
+func getSelfSelector() labels.Selector {
+
+	teamReq, err := labels.NewRequirement("app.kubernetes.io/name", selection.Equals, []string{os.Getenv("NAME_LABEL")})
+	panicErr(err)
+	serviceReq, err := labels.NewRequirement("app.kubernetes.io/instance", selection.Equals, []string{os.Getenv("INSTANCE_LABEL")})
+	panicErr(err)
+
+	selector := labels.NewSelector()
+	selector = selector.Add(*teamReq, *serviceReq)
+	return selector
 }

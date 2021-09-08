@@ -23,13 +23,13 @@ import (
 	sync "sync"
 	time "time"
 
+	versioned "cloudprov.org/cloudprov-controller/pkg/generated/clientset/versioned"
+	cloudprovcontroller "cloudprov.org/cloudprov-controller/pkg/generated/informers/externalversions/cloudprovcontroller"
+	internalinterfaces "cloudprov.org/cloudprov-controller/pkg/generated/informers/externalversions/internalinterfaces"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	cache "k8s.io/client-go/tools/cache"
-	versioned "k8s.io/sample-controller/pkg/generated/clientset/versioned"
-	internalinterfaces "k8s.io/sample-controller/pkg/generated/informers/externalversions/internalinterfaces"
-	samplecontroller "k8s.io/sample-controller/pkg/generated/informers/externalversions/samplecontroller"
 )
 
 // SharedInformerOption defines the functional option type for SharedInformerFactory.
@@ -172,9 +172,9 @@ type SharedInformerFactory interface {
 	ForResource(resource schema.GroupVersionResource) (GenericInformer, error)
 	WaitForCacheSync(stopCh <-chan struct{}) map[reflect.Type]bool
 
-	Samplecontroller() samplecontroller.Interface
+	Samplecontroller() cloudprovcontroller.Interface
 }
 
-func (f *sharedInformerFactory) Samplecontroller() samplecontroller.Interface {
-	return samplecontroller.New(f, f.namespace, f.tweakListOptions)
+func (f *sharedInformerFactory) Samplecontroller() cloudprovcontroller.Interface {
+	return cloudprovcontroller.New(f, f.namespace, f.tweakListOptions)
 }

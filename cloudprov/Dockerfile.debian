@@ -1,0 +1,13 @@
+FROM golang:buster AS builder
+RUN apt-get update && apt-get -qqy install upx-ucl
+WORKDIR /build
+COPY go.mod go.sum /build/
+RUN go mod download
+COPY . .
+RUN go install -ldflags="-s -w"
+RUN upx /go/bin/cloudprov-controller
+
+
+FROM debian:buster AS runner
+COPY --from=builder /go/bin/cloudprov-controller /usr/local/bin
+CMD [ "/usr/local/bin/cloudprov-controller" ]

@@ -14,6 +14,7 @@ spec:
     metadata:
       labels:
         {{- include "cloudprov.selectorLabels" . | nindent 8 }}
+
     spec:
     {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -24,3 +25,8 @@ spec:
         - name: {{ .Chart.Name }}
           image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: "NAME_LABEL"
+              value: {{ include "cloudprov.name" . }}
+            - name: "INSTANCE_LABEL"
+              value: {{ .Release.Name }}

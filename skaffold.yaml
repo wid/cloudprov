@@ -4,7 +4,7 @@ build:
   tagPolicy:
     sha256: {}
   artifacts:
-    - image: cloudprov
+    - image: widmaster/cloudprov
       context: ./cloudprov
       sync:
         infer:
@@ -19,8 +19,9 @@ deploy:
     releases:
       - name: cloudprov
         chartPath: charts/cloudprov
-        namespace: cloudprov
+        namespace: kube-system
         artifactOverrides:
-          image: cloudprov
+          image: widmaster/cloudprov
         imageStrategy:
           helm: {}
+        valuesFiles: ["./values.sensible.yaml"]

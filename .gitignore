@@ -1,3 +1,6 @@
 dist
 .DS_Store
-wimtk/wimtk
+cloudprov/cloudprov-provisionner
+cloudprov/utils.go
+cloudprov/artifacts/examples/example-admin-secret.yaml
+*sensible*

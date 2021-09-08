@@ -1,0 +1,5 @@
+#!/bin/sh
+
+docker push widmaster/cloudprov:alpine
+docker push widmaster/cloudprov:debian
+docker push widmaster/cloudprov:latest

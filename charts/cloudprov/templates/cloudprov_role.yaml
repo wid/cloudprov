@@ -1,0 +1,14 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cloudprov
+rules:
+- apiGroups: [""] # "" indicates the core API group
+  resources: ["pods", "secrets", "events"]
+  verbs: ["get", "watch", "list", "create", "update", "delete", "patch"]
+- apiGroups: ["batch"] # "" indicates the core API group
+  resources: ["jobs"]
+  verbs: ["get", "watch", "list", "create", "update", "delete"]
+- apiGroups: ["cloudprov.org"] # "" indicates the core API group
+  resources: ["postgreses", "jobs"]
+  verbs: ["get", "watch", "list", "create", "update", "delete"]
