@@ -327,7 +327,7 @@ func postgresSecret(postgres *cloudprovcontroller.Postgres, adminSecret *corev1.
 	return &updatedAdminsecret
 }
 
-func TestDeleteJob(t *testing.T) {
+func TestDeletePostgresWithAdminEntry(t *testing.T) {
 	config = Config{JobNamespace: "kube-system", AdminSecret: "admin-secret", SelfPod: testSelfPod()}
 	currentTime := metav1.NewTime(time.Now())
 	f := newFixture(t)
@@ -345,13 +345,16 @@ func TestDeleteJob(t *testing.T) {
 
 	masterConfiguration := make(map[string][]byte)
 	databaseCredentials := testConfigurationGenerator(postgres, masterConfiguration)
+	f.expectGetSecretAction("not-kube-system", "test")
+	f.expectGetSecretAction("kube-system", "admin-secret")
+	f.expectGetSecretAction("not-kube-system", "test")
 	f.expectGetSecretAction("kube-system", "admin-secret")
 	f.expectCreateJobAction(newDatabaseDeletionJob(postgres, &databaseCredentials, config))
 
 	f.runExpectError(getKey(postgres, t))
 }
 
-func TestDeleteJobNoEntry(t *testing.T) {
+func TestDeletePostgresNoEntry(t *testing.T) {
 	config = Config{JobNamespace: "kube-system", AdminSecret: "admin-secret", SelfPod: testSelfPod()}
 	currentTime := metav1.NewTime(time.Now())
 	f := newFixture(t)

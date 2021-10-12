@@ -243,75 +243,62 @@ func (c *Controller) syncHandler(key string) error {
 		}
 		return err
 	}
-	DebugF("shouldDelete\n")
-	if c.shouldDelete(postgres) {
-		DebugF("handleDeletion\n")
-		err = c.handleDeletion(postgres)
-		if err != nil {
-			return err
+	if !c.isPostgresSecretPresent(postgres) {
+		if c.shouldCreateCredentials(postgres) {
+			DebugF("handleCredentialsCreation\n")
+			return c.handleCredentialsCreation(postgres)
+		}
+
+		if c.shouldCreateDatabase(postgres) {
+			DebugF("handleDatabaseCreation\n")
+			return c.handleDatabaseCreation(postgres)
+		}
+
+		if c.shouldUpdatePostgresStatus(postgres) {
+			DebugF("handleSecretCreation\n")
+			return c.handleUpdatePostgresStatus(postgres)
+		}
+
+		if c.shouldCreateSecret(postgres) {
+			DebugF("handleSecretCreation\n")
+			return c.handleSecretCreation(postgres)
 		}
 	}
-	DebugF("shouldCreateCredentials\n")
-	if c.shouldCreateCredentials(postgres) {
-		DebugF("handleCredentialsCreation\n")
-		c.handleCredentialsCreation(postgres)
-		return fmt.Errorf("Creating credentials for %v in %v", postgres.Name, postgres.Namespace)
-	}
-	DebugF("shouldCreateDatabase\n")
-	if c.shouldCreateDatabase(postgres) {
-		DebugF("handleDatabaseCreation\n")
-		err = c.handleDatabaseCreation(postgres)
-		if err != nil {
-			return err
+
+	if c.inDeletionProcess(postgres) {
+		if c.shouldDeleteDatabase(postgres) {
+			DebugF("handleDatabaseDeletion\n")
+			return c.handleDatabaseDeletion(postgres)
+		}
+
+		if c.shouldDeleteCredentials(postgres) {
+			DebugF("handleCredentialDeletion\n")
+			return c.handleCredentialsDeletion(postgres)
+		}
+
+		if c.shouldDeleteFinalizers(postgres) {
+			DebugF("handleFinalizersDeletion\n")
+			return c.handleFinalizersDeletion(postgres)
 		}
 	}
-
-	DebugF("Error Value: %v", err)
-
-	if err != nil {
-		return err
-	}
-
 	c.recorder.Event(postgres, corev1.EventTypeNormal, SuccessSynced, MessageResourceSynced)
 	return nil
 }
 
-func (c *Controller) shouldDelete(postgres *v1alpha1.Postgres) bool {
-	if postgres.ObjectMeta.DeletionTimestamp != nil {
-		return true
+func (c *Controller) isPostgresSecretPresent(postgres *v1alpha1.Postgres) bool {
+	_, err := c.getPostgresSecret(postgres)
+	if errors.IsNotFound(err) && postgres.ObjectMeta.DeletionTimestamp == nil {
+		return false
 	}
-	return false
-}
-
-func (c *Controller) handleDeletion(postgres *v1alpha1.Postgres) error {
-	databaseCredentials, _ := c.getDatabaseCredentialsFromAdminSecret(postgres, config)
-	if databaseCredentials == nil {
-		return c.updateDeletionFinalizer(postgres)
-	}
-	deletionJob, err := c.getDeletionJob(postgres)
-	if errors.IsNotFound(err) {
-		deletionJob, err = c.createDatabaseDeletionJob(*postgres, databaseCredentials)
-		if err != nil {
-			return err
-		}
-		return fmt.Errorf("Creating deletion job %v/%v", deletionJob.Namespace, deletionJob.Name)
-	}
-	if deletionJob.Status.Succeeded == 1 {
-		return c.updateDeletionFinalizer(postgres)
-	}
-	return nil
+	return true
 }
 
 func (c *Controller) shouldCreateCredentials(postgres *v1alpha1.Postgres) bool {
-	postgresSecret, err := c.getPostgresSecret(postgres)
-	if !errors.IsNotFound(err) {
-		DebugF("%v\n", err)
+	adminSecret, err := c.getAdminSecret(postgres)
+	if errors.IsNotFound(err) {
+		panicErr(fmt.Errorf("I couldn't find the admin-secret containing connexion credentials to the database"))
 	}
-	adminSecret, _ := c.getAdminSecret(postgres)
-	if !errors.IsNotFound(err) {
-		DebugF("%v\n", err)
-	}
-	if postgresSecret == nil && adminSecret.Data[referenceName(postgres)] == nil {
+	if adminSecret.Data[referenceName(postgres)] == nil {
 		return true
 	}
 	return false
@@ -322,7 +309,8 @@ func (c *Controller) handleCredentialsCreation(postgres *v1alpha1.Postgres) erro
 	if err != nil {
 		return err
 	}
-	credentials := configurationChooserFromDriver(string(adminSecret.Data["DRIVER"]))(postgres, adminSecret.Data)
+	configurationProvider := configurationChooserFromDriver(string(adminSecret.Data["DRIVER"]))
+	credentials := configurationProvider(postgres, adminSecret.Data)
 	jsonCredentials, err := json.Marshal(credentials)
 	adminSecret.Data[referenceName(postgres)] = jsonCredentials
 	_, err = c.updateAdminSecret(adminSecret)
@@ -332,45 +320,125 @@ func (c *Controller) handleCredentialsCreation(postgres *v1alpha1.Postgres) erro
 	return nil
 }
 
-func (c *Controller) handleSecretExists(postgres *v1alpha1.Postgres) error {
-	postgresSecret, err := c.getPostgresSecret(postgres)
-	if err == nil && postgres.Status.ProvisioningStatus != cloudprovv1alpha1.PostgresProvisionningSucceeded {
-		_, err := c.updatePostgresStatusFromSecret(postgres, postgresSecret)
-		return err
-	}
-	return nil
-}
-
 func (c *Controller) shouldCreateDatabase(postgres *v1alpha1.Postgres) bool {
-	postgresSecret, _ := c.getPostgresSecret(postgres)
 	adminSecret, _ := c.getAdminSecret(postgres)
-	if postgresSecret == nil && adminSecret.Data[referenceName(postgres)] != nil {
+	if adminSecret.Data[referenceName(postgres)] != nil {
 		return true
 	}
 	return false
 }
 
 func (c *Controller) handleDatabaseCreation(postgres *v1alpha1.Postgres) error {
-	job, err := c.jobsLister.Jobs(c.config.JobNamespace).Get(creationJobName(postgres))
+	_, err := c.jobsLister.Jobs(c.config.JobNamespace).Get(creationJobName(postgres))
 	if errors.IsNotFound(err) {
-		job, err = c.createDatabaseCreationJob(postgres, c.config)
-		if err == nil {
-			return fmt.Errorf("Creating database creation Job for %v/%v", postgres.Namespace, postgres.Name)
-		}
+		_, err = c.createDatabaseCreationJob(postgres, c.config)
 	}
+	return err
+}
+
+func (c *Controller) shouldUpdatePostgresStatus(postgres *v1alpha1.Postgres) bool {
+	if postgres.Status.ProvisioningStatus != cloudprovv1alpha1.PostgresProvisionningSucceeded {
+		return true
+	}
+	return false
+}
+
+func (c *Controller) handleUpdatePostgresStatus(postgres *v1alpha1.Postgres) error {
+	job, err := c.jobsLister.Jobs(c.config.JobNamespace).Get(creationJobName(postgres))
 	if err != nil {
 		return err
 	}
-	updatedPostgres, err := c.updatePostgresStatusFromJob(postgres, job)
+	_, err = c.updatePostgresStatusFromJob(postgres, job)
 	if err != nil {
 		return err
 	}
-	if updatedPostgres.Status.ProvisioningStatus == cloudprovv1alpha1.PostgresProvisionningSucceeded {
-		_, err = c.createPostgresSecret(postgres)
+	return nil
+}
+
+func (c *Controller) shouldCreateSecret(postgres *v1alpha1.Postgres) bool {
+	if postgres.Status.ProvisioningStatus == cloudprovv1alpha1.PostgresProvisionningSucceeded {
+		return true
+	}
+	return false
+}
+
+func (c *Controller) handleSecretCreation(postgres *v1alpha1.Postgres) error {
+	_, err := c.createPostgresSecret(postgres)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Controller) inDeletionProcess(postgres *v1alpha1.Postgres) bool {
+	if postgres.ObjectMeta.DeletionTimestamp != nil &&
+		postgres.ObjectMeta.Finalizers[0] == "cloudprov.org/delete-database" {
+		return true
+	}
+	return false
+}
+
+func (c *Controller) shouldDeleteDatabase(postgres *v1alpha1.Postgres) bool {
+	if postgres.ObjectMeta.DeletionTimestamp != nil &&
+		postgres.ObjectMeta.Finalizers[0] == "cloudprov.org/delete-database" {
+		return true
+	}
+	return false
+}
+
+func (c *Controller) handleDatabaseDeletion(postgres *v1alpha1.Postgres) error {
+	_, err := c.getDeletionJob(postgres)
+	if errors.IsNotFound(err) {
+		databaseCredentials, _ := c.getDatabaseCredentialsFromAdminSecret(postgres, config)
+		_, err = c.createDatabaseDeletionJob(*postgres, databaseCredentials)
 		if err != nil {
 			return err
 		}
-		Infof("Creating Secret for %v/%v", postgres.Namespace, postgres.Name)
 	}
 	return nil
+}
+
+func (c *Controller) shouldDeleteCredentials(postgres *v1alpha1.Postgres) bool {
+	if postgres.ObjectMeta.DeletionTimestamp != nil {
+		job, err := c.jobsLister.Jobs(c.config.JobNamespace).Get(deletionJobName(postgres))
+		if errors.IsNotFound(err) {
+			return false
+		}
+		if job.Status.Succeeded == 1 {
+			adminSecret, _ := c.getAdminSecret(postgres)
+			if _, present := adminSecret.Data[referenceName(postgres)]; present {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (c *Controller) handleCredentialsDeletion(postgres *v1alpha1.Postgres) error {
+	adminSecret, err := c.getAdminSecret(postgres)
+	if err != nil {
+		return err
+	}
+	delete(adminSecret.Data, referenceName(postgres))
+	_, err = c.updateAdminSecret(adminSecret)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Controller) shouldDeleteFinalizers(postgres *v1alpha1.Postgres) bool {
+	if postgres.ObjectMeta.DeletionTimestamp == nil ||
+		len(postgres.ObjectMeta.Finalizers) == 0 {
+		return false
+	}
+	_, err := c.getPostgresSecret(postgres)
+	if !errors.IsNotFound(err) {
+		return false
+	}
+	return true
+}
+
+func (c *Controller) handleFinalizersDeletion(postgres *v1alpha1.Postgres) error {
+	return c.updateDeletionFinalizer(postgres)
 }
