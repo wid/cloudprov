@@ -78,7 +78,7 @@ func extractServeurName(user string) string {
 }
 
 func normalizeRune(r rune) rune {
-	if strings.ContainsRune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890-", r) {
+	if strings.ContainsRune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890-.", r) {
 		return r
 	}
 	return -1
